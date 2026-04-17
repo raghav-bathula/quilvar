@@ -1,0 +1,124 @@
+name: Prediction Market Agent
+
+on:
+  schedule:
+    # Scan every 15 minutes
+    - cron: "*/15 * * * *"
+    # Validate daily at 4pm EST (9pm UTC)
+    - cron: "0 21 * * *"
+    # Weekly calibration report every Sunday at noon UTC
+    - cron: "0 12 * * 0"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Job to run manually"
+        required: false
+        default: "scan"
+        type: choice
+        options:
+          - scan
+          - validate
+          - report
+          - reason
+
+env:
+  ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
+  SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY:             ${{ secrets.SUPABASE_KEY }}
+  TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+  STOCKTWITS_ACCESS_TOKEN:  ${{ secrets.STOCKTWITS_ACCESS_TOKEN }}
+  OPENAI_API_KEY:           ${{ secrets.OPENAI_API_KEY }}
+  GOOGLE_API_KEY:           ${{ secrets.GOOGLE_API_KEY }}
+
+jobs:
+  # ── News scan ── every 15 minutes ──────────────────────────────────────────
+  scan:
+    name: News Scan
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'scan' ||
+      github.event_name == 'schedule' && contains(github.event.schedule, '*/15')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install feedparser httpx python-dotenv supabase
+
+      - name: Run news scan
+        run: python news_watcher.py
+
+  # ── Validate outcomes ── daily 4pm EST ────────────────────────────────────
+  validate:
+    name: Validate Outcomes
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'validate' ||
+      github.event_name == 'schedule' && contains(github.event.schedule, '0 21')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install yfinance pandas feedparser python-dotenv supabase httpx
+
+      - name: Validate 1d outcomes
+        run: python signal_validator.py --horizon 1d
+
+      - name: Validate 7d outcomes
+        run: python signal_validator.py --horizon 7d
+
+      - name: Validate 30d outcomes
+        run: python signal_validator.py --horizon 30d
+
+  # ── Calibration report ── every Sunday ────────────────────────────────────
+  report:
+    name: Weekly Calibration Report
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'report' ||
+      github.event_name == 'schedule' && contains(github.event.schedule, '0 12 * * 0')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install yfinance pandas python-dotenv supabase httpx
+
+      - name: Send calibration report
+        run: python signal_validator.py --report
+
+  # ── Reasoning engine ── runs after scan (week 5+) ─────────────────────────
+  reason:
+    name: Claude Reasoning
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'reason'
+    # Remove the manual-only condition and add a schedule here after 30 days of data:
+    # - cron: "*/30 * * * *"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install anthropic openai google-generativeai httpx python-dotenv supabase
+
+      - name: Run reasoning engine
+        run: python claude_reasoning.py --pending
