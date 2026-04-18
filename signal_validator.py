@@ -217,6 +217,17 @@ def calibration_report() -> str:
     return "\n".join(lines)
 
 
+def cleanup_weak_signals(days: int = 30) -> None:
+    """Delete weak_signals rows older than `days`. Runs daily to enforce TTL."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        sb = _sb()
+        sb.table("weak_signals").delete().lt("scan_time", cutoff).execute()
+        print(f"  [cleanup] pruned weak_signals older than {days} days")
+    except Exception as e:
+        print(f"  [warn] cleanup_weak_signals failed: {e}", file=sys.stderr)
+
+
 def cleanup_seen_urls(days: int = 7) -> None:
     """Delete seen_urls rows older than `days`. Runs daily to enforce TTL."""
     try:
@@ -323,6 +334,7 @@ def main() -> None:
     if args.horizon:
         if args.horizon == "1d":
             cleanup_seen_urls()
+            cleanup_weak_signals()
         run_validation(args.horizon)
     else:
         # run all horizons

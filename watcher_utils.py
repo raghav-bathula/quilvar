@@ -150,6 +150,33 @@ def send_telegram(text: str) -> None:
         print(f"  [warn] Telegram send failed: {e}", file=sys.stderr)
 
 
+# ── Weak signal storage ───────────────────────────────────────────────────────
+
+def store_weak_signal(item: dict) -> bool:
+    """Insert a score 1-3 article into weak_signals for future pattern analysis.
+    Returns True on success, False on failure (so caller decides whether to mark seen)."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
+    try:
+        from supabase import create_client
+        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+        sb.table("weak_signals").insert({
+            "scan_time": item["scan_time"],
+            "source":    item["source"],
+            "tier":      item["tier"],
+            "title":     item["title"],
+            "link":      item["link"],
+            "score":     item["score"],
+            "themes":    item["themes"],
+            "tickers":   item["tickers"],
+            "rationale": item.get("rationale"),
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"  [warn] weak_signal insert failed: {e}", file=sys.stderr)
+        return False
+
+
 # ── Local logging ─────────────────────────────────────────────────────────────
 
 def log_alert(item: dict, log_file: Path) -> None:

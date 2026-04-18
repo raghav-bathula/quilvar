@@ -61,3 +61,23 @@ CREATE TABLE seen_urls (
 );
 
 CREATE INDEX idx_seen_urls_stream_seen_at ON seen_urls (stream, seen_at DESC);
+
+-- Weak signals — score 1-3 articles stored for pattern analysis (30-day TTL)
+-- Separate from alerts table to protect calibration integrity
+CREATE TABLE weak_signals (
+  id         bigserial PRIMARY KEY,
+  scan_time  timestamptz NOT NULL,
+  source     text,
+  tier       int,
+  title      text,
+  link       text,
+  score      int,
+  themes     text[],
+  tickers    text[],
+  rationale  text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX idx_weak_signals_scan_time ON weak_signals(scan_time);
+CREATE INDEX idx_weak_signals_tickers   ON weak_signals USING gin(tickers);
+CREATE INDEX idx_weak_signals_themes    ON weak_signals USING gin(themes);

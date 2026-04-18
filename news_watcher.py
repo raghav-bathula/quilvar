@@ -26,6 +26,7 @@ from watcher_utils import (
     log_alert,
     save_seen,
     send_telegram,
+    store_weak_signal,
 )
 
 load_dotenv()
@@ -498,10 +499,11 @@ def _build_alert_text(item: dict) -> str:
 
 # ── Supabase Storage ──────────────────────────────────────────────────────────
 
-def store_alert(item: dict) -> None:
+def store_alert(item: dict) -> bool:
+    """Insert signal into alerts table. Returns True on success."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         print("  [warn] Supabase not configured, skipping DB write.", file=sys.stderr)
-        return
+        return False
     try:
         from supabase import create_client
         sb = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -524,8 +526,10 @@ def store_alert(item: dict) -> None:
             "surprise":        item.get("surprise"),
             "rationale":       item.get("rationale"),
         }).execute()
+        return True
     except Exception as e:
         print(f"  [warn] Supabase insert failed: {e}", file=sys.stderr)
+        return False
 
 
 # ── Core Scan Loop ────────────────────────────────────────────────────────────
@@ -560,14 +564,35 @@ def run_scan(dry_run: bool = False) -> int:
             uid = item_id(source, link)
             if uid in seen:
                 continue
-            seen.add(uid)
-            new_ids.append(uid)
+            seen.add(uid)  # in-memory dedup for this run — not yet persisted
 
             body  = _fetch_article_body(link, source, _strip_html(content), _strip_html(desc))
             score, themes, tickers, extras = score_item(title, body)
-            if score < DB_THRESHOLD:
+
+            # Score 0: prefilter miss — irrelevant, mark seen and skip
+            if score == 0:
+                new_ids.append(uid)
                 continue
 
+            # Score 1-3: weak signal — store for pattern analysis, not alerting
+            if score < DB_THRESHOLD:
+                weak_record = {
+                    "scan_time": datetime.now(timezone.utc).isoformat(),
+                    "source":    source,
+                    "tier":      tier,
+                    "title":     title,
+                    "link":      link,
+                    "score":     score,
+                    "themes":    themes,
+                    "tickers":   tickers,
+                    "rationale": extras.get("rationale"),
+                }
+                print(f"  [weak] score={score} | {title[:80]}")
+                if dry_run or store_weak_signal(weak_record):
+                    new_ids.append(uid)  # mark seen only on successful storage
+                continue
+
+            # Score >= DB_THRESHOLD: real signal
             markets = scan_markets(tickers, themes, extras.get("market_question")) if not dry_run else []
             top_market = markets[0] if markets else {}
 
@@ -592,7 +617,12 @@ def run_scan(dry_run: bool = False) -> int:
             log_alert(record, ALERTS_LOG_FILE)
 
             if not dry_run:
-                store_alert(record)
+                if store_alert(record):
+                    new_ids.append(uid)  # Phase 1 fix: mark seen only on success
+                else:
+                    seen.discard(uid)    # allow retry next run
+            else:
+                new_ids.append(uid)
 
             if score >= ALERT_THRESHOLD:
                 if is_duplicate_story(tickers, themes, recent_alerted):
