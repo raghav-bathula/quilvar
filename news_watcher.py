@@ -32,7 +32,7 @@ SEEN_ITEMS_FILE  = Path("seen_items.json")
 ALERTS_LOG_FILE  = Path("alerts_log.jsonl")
 MAX_ENTRIES_PER_FEED = 20   # cap per feed — runs are every 15 min
 
-ALERT_THRESHOLD = 6   # send Telegram + StockTwits
+ALERT_THRESHOLD = 7   # send Telegram + StockTwits
 DB_THRESHOLD    = 4   # store in Supabase
 
 # ── RSS Feeds ─────────────────────────────────────────────────────────────────
