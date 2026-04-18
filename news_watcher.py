@@ -367,6 +367,62 @@ def item_id(source: str, link: str) -> str:
     return hashlib.sha1(f"{source}|{link}".encode()).hexdigest()
 
 
+# ── Article body fetcher ──────────────────────────────────────────────────────
+
+_PAYWALL_MARKERS = [
+    "subscribe to read", "subscribe to continue", "sign in to read",
+    "create a free account", "already a subscriber", "subscription required",
+    "to continue reading", "this content is for subscribers",
+]
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(html: str) -> str:
+    text = _TAG_RE.sub(" ", html)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def _fetch_article_body(url: str, source: str, rss_content: str, rss_description: str) -> str:
+    """
+    Return the best available text for Haiku to classify.
+    Priority:
+      1. RSS full content field (if >= 500 chars) — free, no network call
+      2. Fetched article body (stripped HTML, first 2000 chars)
+      3. RSS description fallback
+    """
+    # 1 — RSS already has full content
+    if len(rss_content) >= 500:
+        return rss_content[:2000]
+
+    # SEC EDGAR: the RSS description IS the filing summary — fetch adds nothing
+    if "SEC EDGAR" in source:
+        return rss_description[:2000]
+
+    # 2 — fetch the article
+    try:
+        r = httpx.get(
+            url,
+            timeout=5,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code != 200:
+            return rss_description[:2000]
+
+        body = _strip_html(r.text)
+
+        # paywall detection
+        lower = body.lower()
+        if any(marker in lower for marker in _PAYWALL_MARKERS) or len(body) < 200:
+            return rss_description[:2000]
+
+        return body[:2000]
+
+    except Exception:
+        return rss_description[:2000]
+
+
 # ── Signal Scoring ────────────────────────────────────────────────────────────
 
 def score_item(title: str, description: str) -> tuple[int, list[str], list[str], dict]:
@@ -615,16 +671,18 @@ def run_scan(dry_run: bool = False) -> int:
             print(f"  [warn] 0 entries returned (feed may be blocked or empty)", file=sys.stderr)
 
         for entry in feed.entries[:MAX_ENTRIES_PER_FEED]:
-            link  = entry.get("link", "")
-            title = entry.get("title", "")
-            desc  = entry.get("summary", entry.get("description", ""))
+            link    = entry.get("link", "")
+            title   = entry.get("title", "")
+            desc    = entry.get("summary", entry.get("description", ""))
+            content = entry.get("content", [{}])[0].get("value", "") if entry.get("content") else ""
 
             uid = item_id(source, link)
             if uid in seen:
                 continue
             new_ids.add(uid)
 
-            score, themes, tickers, extras = score_item(title, desc)
+            body  = _fetch_article_body(link, source, _strip_html(content), _strip_html(desc))
+            score, themes, tickers, extras = score_item(title, body)
             if score < DB_THRESHOLD:
                 continue
 
