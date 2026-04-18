@@ -460,6 +460,42 @@ def scan_markets(tickers: list[str], themes: list[str], haiku_market_q: str | No
     return hits
 
 
+# ── Deduplication (cross-source story dedup) ─────────────────────────────────
+
+def _load_recent_alerted(hours: int = 4) -> list[dict]:
+    """Load alerts from the last N hours that triggered a Telegram notification."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    try:
+        from supabase import create_client
+        from datetime import timedelta
+        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        rows = (
+            sb.table("alerts")
+            .select("tickers,themes")
+            .gte("scan_time", cutoff)
+            .gte("score", ALERT_THRESHOLD)
+            .execute()
+        )
+        return rows.data
+    except Exception as e:
+        print(f"  [warn] load_recent_alerted failed: {e}", file=sys.stderr)
+        return []
+
+
+def _is_duplicate_story(tickers: list[str], themes: list[str], recent: list[dict]) -> bool:
+    """Return True if this article overlaps with a recently alerted story."""
+    ticker_set = set(tickers)
+    theme_set  = set(themes)
+    for alert in recent:
+        existing_tickers = set(alert.get("tickers") or [])
+        existing_themes  = set(alert.get("themes")  or [])
+        if ticker_set & existing_tickers and theme_set & existing_themes:
+            return True
+    return False
+
+
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 def send_telegram(text: str) -> None:
@@ -561,6 +597,7 @@ def run_scan(dry_run: bool = False) -> int:
     seen    = load_seen()
     new_ids: set[str] = set()
     alerts  = 0
+    recent_alerted: list[dict] = _load_recent_alerted()
 
     for feed_def in RSS_FEEDS:
         url    = feed_def["url"]
@@ -618,15 +655,19 @@ def run_scan(dry_run: bool = False) -> int:
                 store_alert(record)
 
             if score >= ALERT_THRESHOLD:
-                alerts += 1
-                text = _build_alert_text(record)
-                print(f"  >>> ALERT score={score} | {title[:80]}")
-                if not dry_run:
-                    send_telegram(text)
-                    if tickers:
-                        send_stocktwits(text.replace("*", ""))
+                if _is_duplicate_story(tickers, themes, recent_alerted):
+                    print(f"  [dedup] story already alerted, storing only | {title[:60]}")
                 else:
-                    print(f"  [dry-run] would send:\n{text}\n")
+                    alerts += 1
+                    text = _build_alert_text(record)
+                    print(f"  >>> ALERT score={score} | {title[:80]}")
+                    if not dry_run:
+                        send_telegram(text)
+                        if tickers:
+                            send_stocktwits(text.replace("*", ""))
+                        recent_alerted.append({"tickers": tickers, "themes": themes})
+                    else:
+                        print(f"  [dry-run] would send:\n{text}\n")
             else:
                 print(f"  [db] score={score} | {title[:80]}")
 
