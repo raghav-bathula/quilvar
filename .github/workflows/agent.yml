@@ -49,7 +49,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install feedparser httpx python-dotenv supabase anthropic
+        run: pip install -r requirements.txt
 
       - name: Run news scan
         run: python news_watcher.py
@@ -70,7 +70,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install yfinance pandas feedparser python-dotenv supabase httpx
+        run: pip install -r requirements.txt
 
       - name: Validate 1d outcomes
         run: python signal_validator.py --horizon 1d
@@ -97,7 +97,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install yfinance pandas python-dotenv supabase httpx
+        run: pip install -r requirements.txt
 
       - name: Send calibration report
         run: python signal_validator.py --report
@@ -116,7 +116,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install feedparser httpx python-dotenv supabase anthropic
+        run: pip install -r requirements.txt
 
       - name: Run crypto scan
         run: python crypto_watcher.py
@@ -138,7 +138,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install anthropic openai google-generativeai httpx python-dotenv supabase
+        run: pip install -r requirements.txt
 
       - name: Run reasoning engine
         run: python claude_reasoning.py --pending
