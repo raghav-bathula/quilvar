@@ -52,3 +52,12 @@ CREATE INDEX idx_score       ON alerts(score);
 CREATE INDEX idx_outcome_1d  ON alerts(outcome_1d);
 CREATE INDEX idx_reasoned_at ON alerts(reasoned_at);
 CREATE INDEX idx_gap         ON alerts(gap);
+
+-- Article deduplication — 7-day TTL, replaces signal_config JSON blob approach
+CREATE TABLE seen_urls (
+  url_hash  text        PRIMARY KEY,
+  stream    text        NOT NULL,       -- 'equity' or 'crypto'
+  seen_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_seen_urls_stream_seen_at ON seen_urls (stream, seen_at DESC);

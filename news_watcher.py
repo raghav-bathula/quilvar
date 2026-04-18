@@ -28,9 +28,9 @@ TELEGRAM_CHAT_ID        = os.getenv("TELEGRAM_CHAT_ID")
 STOCKTWITS_ACCESS_TOKEN = os.getenv("STOCKTWITS_ACCESS_TOKEN")
 ANTHROPIC_API_KEY       = os.getenv("ANTHROPIC_API_KEY")
 
-SEEN_ITEMS_FILE  = Path("seen_items.json")
-ALERTS_LOG_FILE  = Path("alerts_log.jsonl")
-MAX_ENTRIES_PER_FEED = 20   # cap per feed — runs are every 15 min
+ALERTS_LOG_FILE      = Path("alerts_log.jsonl")
+MAX_ENTRIES_PER_FEED = 20   # cap per feed — runs are every 30 min
+_STREAM              = "equity"
 
 ALERT_THRESHOLD = 7   # send Telegram + StockTwits
 DB_THRESHOLD    = 4   # store in Supabase
@@ -326,43 +326,40 @@ KALSHI_URL = (
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
-_SEEN_CONFIG_KEY = "seen_items_equity"
+def load_seen(stream: str) -> set[str]:
+    """Load seen URL hashes from the last 7 days for this stream."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return set()
+    try:
+        from supabase import create_client
+        from datetime import timedelta
+        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        rows = (
+            sb.table("seen_urls")
+            .select("url_hash")
+            .eq("stream", stream)
+            .gte("seen_at", cutoff)
+            .execute()
+        )
+        return {r["url_hash"] for r in rows.data}
+    except Exception as e:
+        print(f"  [warn] load_seen failed: {e}", file=sys.stderr)
+        return set()
 
 
-def load_seen() -> tuple[set[str], list[str]]:
-    """Load seen IDs. Returns (set for fast lookup, ordered list for recency-bounded saving)."""
-    if SUPABASE_URL and SUPABASE_KEY:
-        try:
-            from supabase import create_client
-            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-            row = sb.table("signal_config").select("value").eq("key", _SEEN_CONFIG_KEY).execute()
-            if row.data:
-                ordered = row.data[0]["value"]  # list preserved in insertion order
-                return set(ordered), ordered
-        except Exception as e:
-            print(f"  [warn] load_seen from Supabase failed: {e}", file=sys.stderr)
-    if SEEN_ITEMS_FILE.exists():
-        ordered = json.loads(SEEN_ITEMS_FILE.read_text())
-        return set(ordered), ordered
-    return set(), []
-
-
-def save_seen(ordered: list[str]) -> None:
-    """Persist seen IDs. ordered list preserves insertion order; keep last 2000."""
-    ids = ordered[-2000:]
-    if SUPABASE_URL and SUPABASE_KEY:
-        try:
-            from supabase import create_client
-            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-            sb.table("signal_config").upsert({
-                "key":        _SEEN_CONFIG_KEY,
-                "value":      ids,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }).execute()
-            return
-        except Exception as e:
-            print(f"  [warn] save_seen to Supabase failed: {e}", file=sys.stderr)
-    SEEN_ITEMS_FILE.write_text(json.dumps(ids))
+def save_seen(new_hashes: list[str], stream: str) -> None:
+    """Upsert new URL hashes into seen_urls. Only inserts hashes added this run."""
+    if not new_hashes or not SUPABASE_URL or not SUPABASE_KEY:
+        return
+    try:
+        from supabase import create_client
+        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [{"url_hash": h, "stream": stream, "seen_at": now} for h in new_hashes]
+        sb.table("seen_urls").upsert(rows, on_conflict="url_hash").execute()
+    except Exception as e:
+        print(f"  [warn] save_seen failed: {e}", file=sys.stderr)
 
 
 def item_id(source: str, link: str) -> str:
@@ -652,8 +649,8 @@ def log_alert(item: dict) -> None:
 # ── Core Scan Loop ────────────────────────────────────────────────────────────
 
 def run_scan(dry_run: bool = False) -> int:
-    seen, seen_ordered = load_seen()
-    new_ids: list[str] = []   # ordered list — append preserves insertion order
+    seen    = load_seen(_STREAM)
+    new_ids: list[str] = []
     alerts  = 0
     recent_alerted: list[dict] = _load_recent_alerted()
 
@@ -732,7 +729,8 @@ def run_scan(dry_run: bool = False) -> int:
             else:
                 print(f"  [db] score={score} | {title[:80]}")
 
-    save_seen(seen_ordered + new_ids)
+    if not dry_run:
+        save_seen(new_ids, _STREAM)
     return alerts
 
 

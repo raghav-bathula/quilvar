@@ -217,6 +217,17 @@ def calibration_report() -> str:
     return "\n".join(lines)
 
 
+def cleanup_seen_urls(days: int = 7) -> None:
+    """Delete seen_urls rows older than `days`. Runs daily to enforce TTL."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        sb = _sb()
+        sb.table("seen_urls").delete().lt("seen_at", cutoff).execute()
+        print(f"  [cleanup] pruned seen_urls older than {days} days")
+    except Exception as e:
+        print(f"  [warn] cleanup_seen_urls failed: {e}", file=sys.stderr)
+
+
 def send_telegram(text: str) -> None:
     import httpx
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -310,6 +321,8 @@ def main() -> None:
         return
 
     if args.horizon:
+        if args.horizon == "1d":
+            cleanup_seen_urls()
         run_validation(args.horizon)
     else:
         # run all horizons
