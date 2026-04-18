@@ -2,8 +2,8 @@ name: Prediction Market Agent
 
 on:
   schedule:
-    # Scan every 15 minutes
-    - cron: "*/15 * * * *"
+    # Scan every 30 minutes
+    - cron: "*/30 * * * *"
     # Validate daily at 4pm EST (9pm UTC)
     - cron: "0 21 * * *"
     # Weekly calibration report every Sunday at noon UTC
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'scan' ||
-      github.event_name == 'schedule' && contains(github.event.schedule, '*/15')
+      github.event_name == 'schedule' && contains(github.event.schedule, '*/30')
     steps:
       - uses: actions/checkout@v4
 
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'scan' ||
-      github.event_name == 'schedule' && contains(github.event.schedule, '*/15')
+      github.event_name == 'schedule' && contains(github.event.schedule, '*/30')
     steps:
       - uses: actions/checkout@v4
 
