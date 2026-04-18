@@ -382,16 +382,8 @@ def scan_markets(
                     "market_url": m.get("url", ""),
                 })
 
-    kalshi_data = _fetch_json(KALSHI_URL)
-    if isinstance(kalshi_data, dict):
-        for m in kalshi_data.get("markets", []):
-            q = m.get("title", "")
-            if _crypto_market_relevance(q, assets, themes, haiku_market_q):
-                hits.append({
-                    "platform":   "kalshi",
-                    "market":     q,
-                    "market_url": f"https://kalshi.com/markets/{m.get('ticker_name', '')}",
-                })
+    # Kalshi now requires authentication — disabled until API key is added
+    # kalshi_data = _fetch_json(KALSHI_URL)
 
     return hits
 
