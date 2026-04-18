@@ -35,25 +35,24 @@ def _sb():
 
 def fetch_pending(horizon: str) -> list[dict]:
     """Fetch alerts that need validation for the given horizon."""
-    col = f"validated_{horizon}"
-    sb  = _sb()
-    # alerts with tickers, not yet validated for this horizon
+    col    = f"validated_{horizon}"
+    sb     = _sb()
+    days   = {"1d": 1, "7d": 7, "30d": 30}[horizon]
+    now    = datetime.now(timezone.utc)
+    cutoff_dt = (now - timedelta(days=days)).isoformat()
+
+    # Only fetch rows old enough for this horizon, not yet validated, with tickers
     resp = (
         sb.table("alerts")
         .select("*")
         .is_(col, "null")
         .not_.is_("tickers", "null")
+        .lte("scan_time", cutoff_dt)
+        .order("scan_time", desc=False)
+        .limit(200)
         .execute()
     )
-    rows = resp.data or []
-    # Filter: scan_time must be old enough for this horizon
-    now    = datetime.now(timezone.utc)
-    cutoff = {"1d": 1, "7d": 7, "30d": 30}[horizon]
-    return [
-        r for r in rows
-        if (now - datetime.fromisoformat(r["scan_time"].replace("Z", "+00:00")))
-           >= timedelta(days=cutoff)
-    ]
+    return resp.data or []
 
 
 def update_row(row_id: int, patch: dict) -> None:
@@ -175,7 +174,7 @@ def unusual_whales_tickers() -> set[str]:
 
 def calibration_report() -> str:
     sb   = _sb()
-    resp = sb.table("alerts").select("*").execute()
+    resp = sb.table("alerts").select("*").order("scan_time", desc=False).limit(2000).execute()
     rows = resp.data or []
 
     if not rows:
@@ -228,7 +227,7 @@ def send_telegram(text: str) -> None:
         r = httpx.post(url, json={
             "chat_id":    TELEGRAM_CHAT_ID,
             "text":       text,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",
         }, timeout=10)
         r.raise_for_status()
     except Exception as e:

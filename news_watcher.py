@@ -329,25 +329,27 @@ KALSHI_URL = (
 _SEEN_CONFIG_KEY = "seen_items_equity"
 
 
-def load_seen() -> set[str]:
-    """Load seen IDs from Supabase (persistent across CI runs), falling back to local file."""
+def load_seen() -> tuple[set[str], list[str]]:
+    """Load seen IDs. Returns (set for fast lookup, ordered list for recency-bounded saving)."""
     if SUPABASE_URL and SUPABASE_KEY:
         try:
             from supabase import create_client
             sb = create_client(SUPABASE_URL, SUPABASE_KEY)
             row = sb.table("signal_config").select("value").eq("key", _SEEN_CONFIG_KEY).execute()
             if row.data:
-                return set(row.data[0]["value"])
+                ordered = row.data[0]["value"]  # list preserved in insertion order
+                return set(ordered), ordered
         except Exception as e:
             print(f"  [warn] load_seen from Supabase failed: {e}", file=sys.stderr)
     if SEEN_ITEMS_FILE.exists():
-        return set(json.loads(SEEN_ITEMS_FILE.read_text()))
-    return set()
+        ordered = json.loads(SEEN_ITEMS_FILE.read_text())
+        return set(ordered), ordered
+    return set(), []
 
 
-def save_seen(seen: set[str]) -> None:
-    """Persist seen IDs to Supabase and local file. Keep most recent 2000 to bound size."""
-    ids = list(seen)[-2000:]
+def save_seen(ordered: list[str]) -> None:
+    """Persist seen IDs. ordered list preserves insertion order; keep last 2000."""
+    ids = ordered[-2000:]
     if SUPABASE_URL and SUPABASE_KEY:
         try:
             from supabase import create_client
@@ -650,8 +652,8 @@ def log_alert(item: dict) -> None:
 # ── Core Scan Loop ────────────────────────────────────────────────────────────
 
 def run_scan(dry_run: bool = False) -> int:
-    seen    = load_seen()
-    new_ids: set[str] = set()
+    seen, seen_ordered = load_seen()
+    new_ids: list[str] = []   # ordered list — append preserves insertion order
     alerts  = 0
     recent_alerted: list[dict] = _load_recent_alerted()
 
@@ -679,7 +681,8 @@ def run_scan(dry_run: bool = False) -> int:
             uid = item_id(source, link)
             if uid in seen:
                 continue
-            new_ids.add(uid)
+            seen.add(uid)
+            new_ids.append(uid)
 
             body  = _fetch_article_body(link, source, _strip_html(content), _strip_html(desc))
             score, themes, tickers, extras = score_item(title, body)
@@ -729,8 +732,7 @@ def run_scan(dry_run: bool = False) -> int:
             else:
                 print(f"  [db] score={score} | {title[:80]}")
 
-    seen.update(new_ids)
-    save_seen(seen)
+    save_seen(seen_ordered + new_ids)
     return alerts
 
 
