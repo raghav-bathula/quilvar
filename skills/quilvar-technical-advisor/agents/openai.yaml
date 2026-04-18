@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quilvar Advisor"
+  short_description: "Technical advisor for Quilvar launch and risk"
+  default_prompt: "Use $quilvar-technical-advisor to advise me on Quilvar architecture, launch readiness, risks, and execution priorities."
