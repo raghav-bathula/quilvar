@@ -12,8 +12,6 @@ Mirrors news_watcher.py but crypto-native throughout:
 """
 
 import argparse
-import hashlib
-import json
 import os
 import re
 import sys
@@ -25,13 +23,23 @@ import feedparser
 import httpx
 from dotenv import load_dotenv
 
+from watcher_utils import (
+    extract_json,
+    fetch_json,
+    is_duplicate_story,
+    item_id,
+    load_recent_alerted,
+    load_seen,
+    log_alert,
+    save_seen,
+    send_telegram,
+)
+
 load_dotenv()
 
-SUPABASE_URL       = os.getenv("SUPABASE_URL")
-SUPABASE_KEY       = os.getenv("SUPABASE_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
-ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_API_KEY")
+SUPABASE_URL      = os.getenv("SUPABASE_URL")
+SUPABASE_KEY      = os.getenv("SUPABASE_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 ALERTS_LOG_FILE      = Path("alerts_log_crypto.jsonl")
 MAX_ENTRIES_PER_FEED = 20   # cap per feed — runs are every 30 min
@@ -158,48 +166,6 @@ _CRYPTO_MARKET_TERMS = [
 ]
 
 
-# ── Deduplication ─────────────────────────────────────────────────────────────
-
-def load_seen(stream: str) -> set[str]:
-    """Load seen URL hashes from the last 7 days for this stream."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return set()
-    try:
-        from supabase import create_client
-        from datetime import timedelta
-        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        rows = (
-            sb.table("seen_urls")
-            .select("url_hash")
-            .eq("stream", stream)
-            .gte("seen_at", cutoff)
-            .execute()
-        )
-        return {r["url_hash"] for r in rows.data}
-    except Exception as e:
-        print(f"  [warn] load_seen failed: {e}", file=sys.stderr)
-        return set()
-
-
-def save_seen(new_hashes: list[str], stream: str) -> None:
-    """Upsert new URL hashes into seen_urls. Only inserts hashes added this run."""
-    if not new_hashes or not SUPABASE_URL or not SUPABASE_KEY:
-        return
-    try:
-        from supabase import create_client
-        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-        now = datetime.now(timezone.utc).isoformat()
-        rows = [{"url_hash": h, "stream": stream, "seen_at": now} for h in new_hashes]
-        sb.table("seen_urls").upsert(rows, on_conflict="url_hash").execute()
-    except Exception as e:
-        print(f"  [warn] save_seen failed: {e}", file=sys.stderr)
-
-
-def item_id(source: str, link: str) -> str:
-    return hashlib.sha1(f"{source}|{link}".encode()).hexdigest()
-
-
 # ── Pre-filter ────────────────────────────────────────────────────────────────
 
 # Titles matching these patterns are aggregator/roundup articles, not signals
@@ -221,22 +187,6 @@ def _passes_prefilter(title: str, description: str) -> bool:
         if re.search(pattern, title.lower()):
             return False
     return True
-
-
-# ── JSON extraction helper ────────────────────────────────────────────────────
-
-def _extract_json(text: str) -> dict | None:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-    return None
 
 
 # ── Haiku classification ──────────────────────────────────────────────────────
@@ -262,7 +212,7 @@ def classify_with_haiku(title: str, description: str) -> tuple[int, list[str], l
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        data = _extract_json(raw)
+        data = extract_json(raw)
         if data:
             score  = max(0, min(10, int(data.get("score", 0))))
             themes = [t for t in data.get("themes", []) if isinstance(t, str)]
@@ -398,7 +348,7 @@ def scan_markets(
 ) -> list[dict]:
     hits: list[dict] = []
 
-    poly_data = _fetch_json(POLYMARKET_URL)
+    poly_data = fetch_json(POLYMARKET_URL)
     if isinstance(poly_data, list):
         for m in poly_data:
             q = m.get("question", "")
@@ -413,52 +363,6 @@ def scan_markets(
     # kalshi_data = _fetch_json(KALSHI_URL)
 
     return hits
-
-
-def _fetch_json(url: str) -> dict | list | None:
-    try:
-        r = httpx.get(url, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"  [warn] market fetch failed: {e}", file=sys.stderr)
-        return None
-
-
-# ── Deduplication (cross-source story dedup) ─────────────────────────────────
-
-def _load_recent_alerted(hours: int = 4) -> list[dict]:
-    """Load alerts from the last N hours that triggered a Telegram notification."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return []
-    try:
-        from supabase import create_client
-        from datetime import timedelta
-        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        rows = (
-            sb.table("alerts")
-            .select("tickers,themes")
-            .gte("scan_time", cutoff)
-            .gte("score", ALERT_THRESHOLD)
-            .execute()
-        )
-        return rows.data
-    except Exception as e:
-        print(f"  [warn] load_recent_alerted failed: {e}", file=sys.stderr)
-        return []
-
-
-def _is_duplicate_story(assets: list[str], themes: list[str], recent: list[dict]) -> bool:
-    """Return True if this article overlaps with a recently alerted story."""
-    asset_set = set(assets)
-    theme_set = set(themes)
-    for alert in recent:
-        existing_assets = set(alert.get("tickers") or [])
-        existing_themes = set(alert.get("themes")  or [])
-        if asset_set & existing_assets and theme_set & existing_themes:
-            return True
-    return False
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────
@@ -486,22 +390,6 @@ def _build_alert_text(item: dict) -> str:
         lines.append(f"Matched: {_html.escape(item['market'])} ({item['platform']})")
     lines.append(item["link"])
     return "\n".join(lines)
-
-
-def send_telegram(text: str) -> None:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("  [warn] Telegram not configured.", file=sys.stderr)
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
-        r = httpx.post(url, json={
-            "chat_id":    TELEGRAM_CHAT_ID,
-            "text":       text,
-            "parse_mode": "HTML",
-        }, timeout=10)
-        r.raise_for_status()
-    except Exception as e:
-        print(f"  [warn] Telegram failed: {e}", file=sys.stderr)
 
 
 # ── Supabase storage ──────────────────────────────────────────────────────────
@@ -537,18 +425,13 @@ def store_alert(item: dict) -> None:
         print(f"  [warn] Supabase insert failed: {e}", file=sys.stderr)
 
 
-def log_alert(item: dict) -> None:
-    with ALERTS_LOG_FILE.open("a") as f:
-        f.write(json.dumps(item) + "\n")
-
-
 # ── Core scan loop ────────────────────────────────────────────────────────────
 
 def run_scan(dry_run: bool = False) -> int:
     seen    = load_seen(_STREAM)
     new_ids: list[str] = []
     alerts  = 0
-    recent_alerted: list[dict] = _load_recent_alerted()
+    recent_alerted: list[dict] = load_recent_alerted(ALERT_THRESHOLD)
 
     for feed_def in CRYPTO_FEEDS:
         url    = feed_def["url"]
@@ -602,12 +485,12 @@ def run_scan(dry_run: bool = False) -> int:
                 "rationale":       extras.get("rationale"),
             }
 
-            log_alert(record)
+            log_alert(record, ALERTS_LOG_FILE)
             if not dry_run:
                 store_alert(record)
 
             if score >= ALERT_THRESHOLD:
-                if _is_duplicate_story(assets, themes, recent_alerted):
+                if is_duplicate_story(assets, themes, recent_alerted):
                     print(f"  [dedup] story already alerted, storing only | {title[:60]}")
                 else:
                     alerts += 1
