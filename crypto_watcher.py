@@ -33,8 +33,9 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_API_KEY")
 
-SEEN_ITEMS_FILE = Path("seen_items_crypto.json")
-ALERTS_LOG_FILE = Path("alerts_log_crypto.jsonl")
+SEEN_ITEMS_FILE      = Path("seen_items_crypto.json")
+ALERTS_LOG_FILE      = Path("alerts_log_crypto.jsonl")
+MAX_ENTRIES_PER_FEED = 20   # cap per feed — runs are every 15 min
 
 ALERT_THRESHOLD = 6
 DB_THRESHOLD    = 4
@@ -159,14 +160,41 @@ _CRYPTO_MARKET_TERMS = [
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
+_SEEN_CONFIG_KEY = "seen_items_crypto"
+
+
 def load_seen() -> set[str]:
+    """Load seen IDs from Supabase (persistent across CI runs), falling back to local file."""
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            from supabase import create_client
+            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+            row = sb.table("signal_config").select("value").eq("key", _SEEN_CONFIG_KEY).execute()
+            if row.data:
+                return set(row.data[0]["value"])
+        except Exception as e:
+            print(f"  [warn] load_seen from Supabase failed: {e}", file=sys.stderr)
     if SEEN_ITEMS_FILE.exists():
         return set(json.loads(SEEN_ITEMS_FILE.read_text()))
     return set()
 
 
 def save_seen(seen: set[str]) -> None:
-    SEEN_ITEMS_FILE.write_text(json.dumps(list(seen)))
+    """Persist seen IDs to Supabase and local file. Keep most recent 2000 to bound size."""
+    ids = list(seen)[-2000:]
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            from supabase import create_client
+            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+            sb.table("signal_config").upsert({
+                "key":        _SEEN_CONFIG_KEY,
+                "value":      ids,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+            return
+        except Exception as e:
+            print(f"  [warn] save_seen to Supabase failed: {e}", file=sys.stderr)
+    SEEN_ITEMS_FILE.write_text(json.dumps(ids))
 
 
 def item_id(source: str, link: str) -> str:
@@ -401,25 +429,26 @@ def _fetch_json(url: str) -> dict | list | None:
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 def _build_alert_text(item: dict) -> str:
+    import html as _html
     assets    = " ".join(item["assets"]) if item["assets"] else "—"
     themes    = ", ".join(item["themes"]) if item["themes"] else "—"
     direction = item.get("direction", "")
     dir_icon  = {"bullish": "▲", "bearish": "▼", "neutral": "◆"}.get(direction, "")
 
     lines = [
-        f"*CRYPTO SIGNAL [{item['score']}/10]* {dir_icon} — {item['source']} (Tier {item['tier']})",
-        item["title"],
-        f"Assets: {assets}",
-        f"Themes: {themes}",
+        f"<b>CRYPTO SIGNAL [{item['score']}/10]</b> {dir_icon} — {_html.escape(item['source'])} (Tier {item['tier']})",
+        _html.escape(item["title"]),
+        f"Assets: {_html.escape(assets)}",
+        f"Themes: {_html.escape(themes)}",
     ]
     if item.get("market_question"):
-        lines.append(f"Market Q: {item['market_question']}")
+        lines.append(f"Market Q: {_html.escape(item['market_question'])}")
     if item.get("surprise") is not None:
         lines.append(f"Surprise: {item['surprise']}/10")
     if item.get("rationale"):
-        lines.append(f"_{item['rationale']}_")
+        lines.append(f"<i>{_html.escape(item['rationale'])}</i>")
     if item.get("market"):
-        lines.append(f"Matched: {item['market']} ({item['platform']})")
+        lines.append(f"Matched: {_html.escape(item['market'])} ({item['platform']})")
     lines.append(item["link"])
     return "\n".join(lines)
 
@@ -433,7 +462,7 @@ def send_telegram(text: str) -> None:
         r = httpx.post(url, json={
             "chat_id":    TELEGRAM_CHAT_ID,
             "text":       text,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",
         }, timeout=10)
         r.raise_for_status()
     except Exception as e:
@@ -500,7 +529,7 @@ def run_scan(dry_run: bool = False) -> int:
             print(f"  [warn] 0 entries", file=sys.stderr)
             continue
 
-        for entry in feed.entries:
+        for entry in feed.entries[:MAX_ENTRIES_PER_FEED]:
             link  = entry.get("link", "")
             title = entry.get("title", "")
             desc  = entry.get("summary", entry.get("description", ""))

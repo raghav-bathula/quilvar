@@ -28,8 +28,9 @@ TELEGRAM_CHAT_ID        = os.getenv("TELEGRAM_CHAT_ID")
 STOCKTWITS_ACCESS_TOKEN = os.getenv("STOCKTWITS_ACCESS_TOKEN")
 ANTHROPIC_API_KEY       = os.getenv("ANTHROPIC_API_KEY")
 
-SEEN_ITEMS_FILE = Path("seen_items.json")
-ALERTS_LOG_FILE = Path("alerts_log.jsonl")
+SEEN_ITEMS_FILE  = Path("seen_items.json")
+ALERTS_LOG_FILE  = Path("alerts_log.jsonl")
+MAX_ENTRIES_PER_FEED = 20   # cap per feed — runs are every 15 min
 
 ALERT_THRESHOLD = 6   # send Telegram + StockTwits
 DB_THRESHOLD    = 4   # store in Supabase
@@ -325,14 +326,41 @@ KALSHI_URL = (
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
+_SEEN_CONFIG_KEY = "seen_items_equity"
+
+
 def load_seen() -> set[str]:
+    """Load seen IDs from Supabase (persistent across CI runs), falling back to local file."""
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            from supabase import create_client
+            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+            row = sb.table("signal_config").select("value").eq("key", _SEEN_CONFIG_KEY).execute()
+            if row.data:
+                return set(row.data[0]["value"])
+        except Exception as e:
+            print(f"  [warn] load_seen from Supabase failed: {e}", file=sys.stderr)
     if SEEN_ITEMS_FILE.exists():
         return set(json.loads(SEEN_ITEMS_FILE.read_text()))
     return set()
 
 
 def save_seen(seen: set[str]) -> None:
-    SEEN_ITEMS_FILE.write_text(json.dumps(list(seen)))
+    """Persist seen IDs to Supabase and local file. Keep most recent 2000 to bound size."""
+    ids = list(seen)[-2000:]
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            from supabase import create_client
+            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+            sb.table("signal_config").upsert({
+                "key":        _SEEN_CONFIG_KEY,
+                "value":      ids,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+            return
+        except Exception as e:
+            print(f"  [warn] save_seen to Supabase failed: {e}", file=sys.stderr)
+    SEEN_ITEMS_FILE.write_text(json.dumps(ids))
 
 
 def item_id(source: str, link: str) -> str:
@@ -443,7 +471,7 @@ def send_telegram(text: str) -> None:
         r = httpx.post(url, json={
             "chat_id":    TELEGRAM_CHAT_ID,
             "text":       text,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",
         }, timeout=10)
         r.raise_for_status()
     except Exception as e:
@@ -468,23 +496,24 @@ def send_stocktwits(body: str) -> None:
 
 
 def _build_alert_text(item: dict) -> str:
+    import html as _html
     cashtags = " ".join(f"${t}" for t in item["tickers"]) if item["tickers"] else "—"
     themes   = ", ".join(item["themes"]) if item["themes"] else "—"
 
     lines = [
-        f"*SIGNAL [{item['score']}/10]* — {item['source']} (Tier {item['tier']})",
-        item["title"],
-        f"Themes: {themes}",
+        f"<b>SIGNAL [{item['score']}/10]</b> — {_html.escape(item['source'])} (Tier {item['tier']})",
+        _html.escape(item["title"]),
+        f"Themes: {_html.escape(themes)}",
         f"Tickers: {cashtags}",
     ]
     if item.get("market_question"):
-        lines.append(f"Market Q: {item['market_question']}")
+        lines.append(f"Market Q: {_html.escape(item['market_question'])}")
     if item.get("surprise") is not None:
         lines.append(f"Surprise: {item['surprise']}/10")
     if item.get("rationale"):
-        lines.append(f"_{item['rationale']}_")
+        lines.append(f"<i>{_html.escape(item['rationale'])}</i>")
     if item.get("market"):
-        lines.append(f"Matched market: {item['market']} ({item['platform']})")
+        lines.append(f"Matched market: {_html.escape(item['market'])} ({item['platform']})")
     lines.append(item["link"])
     return "\n".join(lines)
 
@@ -548,7 +577,7 @@ def run_scan(dry_run: bool = False) -> int:
         if not feed.entries:
             print(f"  [warn] 0 entries returned (feed may be blocked or empty)", file=sys.stderr)
 
-        for entry in feed.entries:
+        for entry in feed.entries[:MAX_ENTRIES_PER_FEED]:
             link  = entry.get("link", "")
             title = entry.get("title", "")
             desc  = entry.get("summary", entry.get("description", ""))
