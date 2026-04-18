@@ -1,6 +1,8 @@
 .env
 seen_items.json
+seen_items_crypto.json
 alerts_log.jsonl
+alerts_log_crypto.jsonl
 __pycache__/
 *.pyc
 *.pyo

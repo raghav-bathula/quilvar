@@ -17,6 +17,7 @@ on:
         type: choice
         options:
           - scan
+          - crypto-scan
           - validate
           - report
           - reason
@@ -48,7 +49,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install feedparser httpx python-dotenv supabase
+        run: pip install feedparser httpx python-dotenv supabase anthropic
 
       - name: Run news scan
         run: python news_watcher.py
@@ -100,6 +101,27 @@ jobs:
 
       - name: Send calibration report
         run: python signal_validator.py --report
+
+  # ── Crypto scan ── every 15 minutes (alongside equities scan) ────────────
+  crypto-scan:
+    name: Crypto Scan
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'scan' ||
+      github.event_name == 'schedule' && contains(github.event.schedule, '*/15')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install feedparser httpx python-dotenv supabase anthropic
+
+      - name: Run crypto scan
+        run: python crypto_watcher.py
 
   # ── Reasoning engine ── runs after scan (week 5+) ─────────────────────────
   reason:

@@ -64,8 +64,11 @@ def update_row(row_id: int, patch: dict) -> None:
 # ── Price validation ──────────────────────────────────────────────────────────
 
 def price_move_pct(ticker: str, from_dt: datetime, horizon_days: int) -> float | None:
-    """Return % price move over horizon_days starting from from_dt."""
-    end_dt = from_dt + timedelta(days=horizon_days + 2)  # buffer for weekends
+    """Return % price move over horizon_days calendar days starting from from_dt.
+    Uses the last available trading day on or before the target date."""
+    target_dt = from_dt + timedelta(days=horizon_days)
+    # Add a 5-day buffer so yfinance always returns enough data to find target date
+    end_dt = target_dt + timedelta(days=5)
     try:
         hist = yf.download(
             ticker,
@@ -77,7 +80,13 @@ def price_move_pct(ticker: str, from_dt: datetime, horizon_days: int) -> float |
         if hist.empty or len(hist) < 2:
             return None
         p_start = float(hist["Close"].iloc[0])
-        p_end   = float(hist["Close"].iloc[min(horizon_days, len(hist) - 1)])
+        # Find the last trading day on or before target_dt
+        target_date = target_dt.date()
+        hist_dates  = hist.index.date if hasattr(hist.index, "date") else [d.date() for d in hist.index]
+        eligible    = [i for i, d in enumerate(hist_dates) if d <= target_date]
+        if not eligible:
+            return None
+        p_end = float(hist["Close"].iloc[eligible[-1]])
         if p_start == 0:
             return None
         return round((p_end - p_start) / p_start * 100, 2)
@@ -266,9 +275,9 @@ def run_validation(horizon: str) -> None:
                 "flow_confirmed":   flow_confirmed,
             },
         }
-        # fill top-level outcome on first horizon to validate
-        if validated and not row.get("outcome"):
-            patch["outcome"] = f"validated_{horizon}"
+        # fill top-level outcome on first horizon processed, win or loss
+        if not row.get("outcome"):
+            patch["outcome"] = f"validated_{horizon}" if validated else f"not_validated_{horizon}"
 
         update_row(row_id, patch)
         status = "✓" if validated else "✗"

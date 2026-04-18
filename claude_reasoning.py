@@ -229,6 +229,7 @@ def run_ensemble(alert: dict, precedents: list[dict]) -> dict:
     )
 
     probs: list[float] = []
+    model_labels: list[str] = []
     model_outputs: dict[str, str] = {}
 
     # Claude
@@ -238,6 +239,7 @@ def run_ensemble(alert: dict, precedents: list[dict]) -> dict:
             p    = _extract_probability(text)
             if p is not None:
                 probs.append(p)
+                model_labels.append("claude")
                 model_outputs["claude"] = text
         except Exception as e:
             print(f"  [warn] Claude: {e}", file=sys.stderr)
@@ -249,6 +251,7 @@ def run_ensemble(alert: dict, precedents: list[dict]) -> dict:
             p    = _extract_probability(text)
             if p is not None:
                 probs.append(p)
+                model_labels.append("gpt4o_mini")
                 model_outputs["gpt4o_mini"] = text
         except Exception as e:
             print(f"  [warn] GPT: {e}", file=sys.stderr)
@@ -260,6 +263,7 @@ def run_ensemble(alert: dict, precedents: list[dict]) -> dict:
             p    = _extract_probability(text)
             if p is not None:
                 probs.append(p)
+                model_labels.append("gemini_flash")
                 model_outputs["gemini_flash"] = text
         except Exception as e:
             print(f"  [warn] Gemini: {e}", file=sys.stderr)
@@ -270,7 +274,7 @@ def run_ensemble(alert: dict, precedents: list[dict]) -> dict:
 
     return {
         "ensemble_prob": ensemble_prob,
-        "model_probs":   dict(zip(["claude", "gpt4o_mini", "gemini_flash"], probs)),
+        "model_probs":   dict(zip(model_labels, probs)),
         "model_outputs": model_outputs,
         "disagreement":  round(disagreement, 1),
         "uncertain":     uncertain,
@@ -337,9 +341,16 @@ def compute_gap(ensemble_prob: float, expert_avg: float, market_prob: float) -> 
 
 
 def _market_implied_prob(alert: dict) -> float:
-    """Best-effort extraction of market-implied probability from stored market data."""
-    # If we had a proper Polymarket/Kalshi price feed, we'd use it here.
-    # For now, return 50.0 as default — update when live market price data is available.
+    """Return market-implied probability for the alert's matched market.
+
+    TODO (activate before enabling reasoning engine):
+      Wire real Polymarket/Kalshi price data here.
+      Polymarket: GET /markets/{conditionId} → outcomePrices[0] (yes price, 0–1)
+      Kalshi:     GET /markets/{ticker} → yes_ask or last_price
+      Store the fetched price in alerts.market_prob at scan time, then read it here.
+      Until this is done, gap/gap_strength/should_alert are computed against 50%
+      and are not meaningful for actual trading decisions.
+    """
     return 50.0
 
 
@@ -496,8 +507,10 @@ def main() -> None:
         print("Error: ANTHROPIC_API_KEY required.", file=sys.stderr)
         sys.exit(1)
 
-    if args.pending or True:  # default action
+    if args.pending:
         run_pending(dry_run=args.dry_run)
+    else:
+        print("No action specified. Use --pending to process alerts or --test for a dry run.")
 
 
 if __name__ == "__main__":
