@@ -182,16 +182,22 @@ Quilvar finds **news that moves stocks**. It monitors RSS feeds, semantically cl
 - Crypto disabled from schedule
 
 ### Next (priority order) 🔲
-1. **`watcher_utils.py`** — extract shared functions from both watchers. Every bug fix currently requires 2 edits. (Effort: S)
-2. **`requirements.txt`** — pin package versions. One bad upstream release silently breaks scheduled runs. (Effort: S)
-3. **Wait for `validated_1d` data** — first calibration data expected tonight. Run `--report` after.
-4. **Fix `_market_implied_prob()`** — wire real Polymarket yes-price. Blocks reasoning engine activation. (Effort: M)
-5. **`calendar_watcher.py`** — earnings + FOMC dates. Score-7 signal before NVDA earnings ≠ random Wednesday. (Effort: M)
+1. ~~**`watcher_utils.py`**~~ — done ✅
+2. ~~**`requirements.txt`**~~ — done ✅
+3. **Structured job logging** — write per-run metrics to a `job_runs` Supabase table (feed_name, entries_parsed, alerts_stored, errors, duration_ms). Distinguishes "quiet market" from "broken pipeline." (Effort: S)
+4. **Historical context injection** — before Haiku classifies, query `alerts` for the last 3-5 validated signals on the same ticker/theme. Inject as prompt context so Haiku knows "the last time we saw NVDA + earnings_surprise, it validated 2/3 times." SQL array overlap on existing columns — no vector DB needed. (Effort: M)
+5. **Fix `_market_implied_prob()`** — wire real Polymarket yes-price. Blocks reasoning engine activation. (Effort: M)
+6. **`calendar_watcher.py`** — earnings + FOMC dates. Score-7 signal before NVDA earnings ≠ random Wednesday. (Effort: M)
+7. **Wait for calibration data** — need 30 days of validated_1d/7d/30d history before reasoning engine can activate.
 
 ### Deferred 🔮
 - Re-enable crypto_watcher after equity tuned
 - Folder restructure (agents/ + shared/) when 3rd agent is scoped
-- Reasoning engine schedule activation (needs calibration data + real market prices)
+- Reasoning engine schedule activation (needs: calibration > 40% + live market prices + 30 days history)
+- Streamlit dashboard on HuggingFace Spaces — calibration charts, signal history (Month 3)
+- LangGraph orchestration — only after state transitions are stable (Month 5+)
+- MCP server exposing Quilvar tools — after data model and auth boundaries stable (Month 5+)
+- Semantic similarity search across article text (RAG/vector DB) — only after hundreds of validated signals exist
 - Sentiment watcher (Reddit RSS, StockTwits)
 - Content pipeline (post-mortems, charts, social distribution)
 
@@ -218,5 +224,5 @@ python claude_reasoning.py --pending
 
 ---
 
-*Last updated: Session 4 — April 2026*
-*Status: Equity pipeline running. Shadow period in progress. Waiting for first validated_1d data tonight.*
+*Last updated: Session 5 — April 2026*
+*Status: Equity pipeline running. Shadow period in progress. Hardening in progress (Phase 1 done). Waiting for 30-day calibration history.*
