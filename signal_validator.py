@@ -186,9 +186,13 @@ def calibration_report() -> str:
 
     for horizon in ("1d", "7d", "30d"):
         col = f"validated_{horizon}"
+        outcome_col = f"outcome_{horizon}"
         if col not in df.columns:
             continue
+        # Exclude crypto rows from precision — they can't be validated via yfinance
         sub = df[df[col].notna()]
+        if outcome_col in df.columns:
+            sub = sub[sub[outcome_col] != "skipped_crypto"]
         if sub.empty:
             lines.append(f"{horizon}: no data yet")
             continue
@@ -198,7 +202,10 @@ def calibration_report() -> str:
     # by source
     lines.append("\nBy source (1d):")
     if "source" in df.columns and "validated_1d" in df.columns:
-        by_source = df[df["validated_1d"].notna()].groupby("source")["validated_1d"].agg(["mean", "count"])
+        mask = df["validated_1d"].notna()
+        if "outcome_1d" in df.columns:
+            mask &= df["outcome_1d"] != "skipped_crypto"
+        by_source = df[mask].groupby("source")["validated_1d"].agg(["mean", "count"])
         for src, row in by_source.iterrows():
             lines.append(f"  {src}: {row['mean']*100:.0f}% ({int(row['count'])} signals)")
 
@@ -269,6 +276,14 @@ def run_validation(horizon: str) -> None:
         row_id  = row["id"]
         tickers = row.get("tickers") or []
         scan_dt = datetime.fromisoformat(row["scan_time"].replace("Z", "+00:00"))
+
+        # Skip crypto rows — BTC/ETH/SOL don't resolve correctly via yfinance
+        reasoning = row.get("reasoning_json") or {}
+        if reasoning.get("asset_class") == "crypto":
+            update_row(row_id, {f"outcome_{horizon}": "skipped_crypto",
+                                f"validated_{horizon}": False})
+            print(f"  [skip] id={row_id} crypto asset — skipping validation")
+            continue
 
         results   = []
         validated = False

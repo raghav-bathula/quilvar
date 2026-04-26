@@ -42,7 +42,7 @@ MAX_ENTRIES_PER_FEED = 20   # cap per feed — runs are every 30 min
 _STREAM              = "equity"
 
 ALERT_THRESHOLD = 7   # send Telegram + StockTwits
-DB_THRESHOLD    = 4   # store in Supabase
+DB_THRESHOLD    = 6   # store in Supabase (raised from 4 — score 4-5 is noise, 18% precision)
 
 # ── RSS Feeds ─────────────────────────────────────────────────────────────────
 RSS_FEEDS = [
@@ -691,15 +691,44 @@ def run_test() -> None:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def send_test_alert() -> None:
+    """Send a real Telegram alert with a dummy signal to verify the pipeline."""
+    record = {
+        "score":          9,
+        "source":         "TEST",
+        "tier":           1,
+        "title":          "Manual test alert — Quilvar pipeline is working",
+        "themes":         ["test"],
+        "tickers":        ["AAPL"],
+        "market_question": "Is the Quilvar alert pipeline functional?",
+        "surprise":       10,
+        "rationale":      "This is a manual test triggered via --send-test.",
+        "market":         None,
+        "platform":       None,
+        "market_url":     None,
+        "link":           "https://github.com/raghav-bathula/quilvar",
+    }
+    text = _build_alert_text(record)
+    print("Sending test alert to Telegram…")
+    print(text)
+    send_telegram(text)
+    print("Done.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prediction market news watcher")
-    parser.add_argument("--test",     action="store_true", help="Dry run with sample data")
-    parser.add_argument("--watch",    action="store_true", help="Run continuously")
-    parser.add_argument("--interval", type=int, default=300, help="Watch interval in seconds")
+    parser.add_argument("--test",      action="store_true", help="Dry run with sample data (no network)")
+    parser.add_argument("--send-test", action="store_true", help="Send a real test alert to Telegram")
+    parser.add_argument("--watch",     action="store_true", help="Run continuously")
+    parser.add_argument("--interval",  type=int, default=300, help="Watch interval in seconds")
     args = parser.parse_args()
 
     if args.test:
         run_test()
+        return
+
+    if args.send_test:
+        send_test_alert()
         return
 
     if args.watch:
