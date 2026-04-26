@@ -343,14 +343,13 @@ def compute_gap(ensemble_prob: float, expert_avg: float, market_prob: float) -> 
 def _market_implied_prob(alert: dict) -> float:
     """Return market-implied probability for the alert's matched market.
 
-    TODO (activate before enabling reasoning engine):
-      Wire real Polymarket/Kalshi price data here.
-      Polymarket: GET /markets/{conditionId} → outcomePrices[0] (yes price, 0–1)
-      Kalshi:     GET /markets/{ticker} → yes_ask or last_price
-      Store the fetched price in alerts.market_prob at scan time, then read it here.
-      Until this is done, gap/gap_strength/should_alert are computed against 50%
-      and are not meaningful for actual trading decisions.
+    Reads market_prob stored at scan time by news_watcher.scan_markets().
+    Value is Polymarket yes-price (0.0–1.0), converted to percentage here.
+    Falls back to 50.0 if no matched market was found for this alert.
     """
+    prob = alert.get("market_prob")
+    if prob is not None:
+        return round(float(prob) * 100, 1)
     return 50.0
 
 

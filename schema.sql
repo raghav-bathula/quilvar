@@ -17,6 +17,7 @@ CREATE TABLE alerts (
   market          text,
   platform        text,
   market_url      text,
+  market_prob     float,       -- Polymarket yes-price at scan time (0.0–1.0)
   market_question text,        -- Haiku-generated prediction market question
   surprise        int,         -- 0-10, how unexpected vs consensus
   rationale       text,        -- Haiku one-line explanation

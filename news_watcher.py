@@ -5,6 +5,7 @@ Supabase storage, Telegram + StockTwits notifications.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -443,10 +444,19 @@ def scan_markets(tickers: list[str], themes: list[str], haiku_market_q: str | No
         for m in poly_data:
             q = m.get("question", "")
             if _market_relevance(q, tickers, themes, haiku_market_q):
+                # Parse yes-price from outcomePrices (JSON string "[\"0.72\", \"0.28\"]")
+                yes_price = None
+                try:
+                    prices = json.loads(m.get("outcomePrices") or "[]")
+                    if prices:
+                        yes_price = float(prices[0])
+                except (ValueError, TypeError):
+                    pass
                 hits.append({
                     "platform":   "polymarket",
                     "market":     q,
                     "market_url": m.get("url", ""),
+                    "yes_price":  yes_price,
                 })
 
     # Kalshi now requires authentication — disabled until API key is added
@@ -522,6 +532,7 @@ def store_alert(item: dict) -> bool:
             "market":          item.get("market"),
             "platform":        item.get("platform"),
             "market_url":      item.get("market_url"),
+            "market_prob":     item.get("market_prob"),
             "market_question": item.get("market_question"),
             "surprise":        item.get("surprise"),
             "rationale":       item.get("rationale"),
@@ -609,6 +620,7 @@ def run_scan(dry_run: bool = False) -> int:
                 "market":          top_market.get("market"),
                 "platform":        top_market.get("platform"),
                 "market_url":      top_market.get("market_url"),
+                "market_prob":     top_market.get("yes_price"),
                 "market_question": extras.get("market_question"),
                 "surprise":        extras.get("surprise"),
                 "rationale":       extras.get("rationale"),
