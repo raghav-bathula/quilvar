@@ -85,7 +85,7 @@ def price_move_pct(ticker: str, from_dt: datetime, horizon_days: int) -> float |
         eligible    = [i for i, d in enumerate(hist_dates) if d <= target_date]
         if not eligible:
             return None
-        p_end = float(hist["Close"].iloc[eligible[-1]])
+        p_end = float(hist["Close"].iat[eligible[-1]])
         if p_start == 0:
             return None
         return round((p_end - p_start) / p_start * 100, 2)
