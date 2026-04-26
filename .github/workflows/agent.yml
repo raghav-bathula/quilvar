@@ -4,10 +4,10 @@ on:
   schedule:
     # Scan every 30 minutes
     - cron: "*/30 * * * *"
-    # Validate daily at 4pm EST (9pm UTC)
-    - cron: "0 21 * * *"
-    # Weekly calibration report every Sunday at noon UTC
-    - cron: "0 12 * * 0"
+    # Validate daily at 4pm EST (9:01pm UTC — offset by 1min to avoid collision with */30 scan)
+    - cron: "1 21 * * *"
+    # Weekly calibration report every Sunday at noon UTC (offset by 2min to avoid collision)
+    - cron: "2 12 * * 0"
   workflow_dispatch:
     inputs:
       job:
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'validate' ||
-      github.event_name == 'schedule' && contains(github.event.schedule, '0 21')
+      github.event_name == 'schedule' && contains(github.event.schedule, '1 21')
     steps:
       - uses: actions/checkout@v4
 
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'report' ||
-      github.event_name == 'schedule' && contains(github.event.schedule, '0 12 * * 0')
+      github.event_name == 'schedule' && contains(github.event.schedule, '2 12 * * 0')
     steps:
       - uses: actions/checkout@v4
 
