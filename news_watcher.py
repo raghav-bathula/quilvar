@@ -74,19 +74,38 @@ RSS_FEEDS = [
      "source": "WSJ Markets", "tier": 3},
 ]
 
-# ── Pre-filter vocabulary (broad — just to drop truly irrelevant items cheaply) ─
-_PREFILTER_TERMS = [
-    # AI / model companies and products
-    "ai", "ml", "model", "llm", "launch", "claude", "anthropic", "openai", "chatgpt",
-    "gemini", "gpt", "copilot", "nvidia", "llama", "mistral", "groq", "perplexity",
-    # Corporate events
-    "acqui", "merger", "ipo", "sec", "8-k", "earnings", "revenue", "guidance",
-    "layoff", "hire", "ceo", "cfo", "fund", "invest", "valuation", "funding",
-    # Market signals
-    "market", "stock", "share", "rate", "fed", "tariff", "inflation", "gdp",
-    "startup", "partner", "deal", "pivot", "rebrand", "compet", "threat", "disrupt",
-    # Macro
-    "war", "sanction", "strait", "opec", "oil", "ceasefire", "iran", "china",
+# ── Pre-filter vocabulary ─────────────────────────────────────────────────────
+# Two tiers to avoid substring false-positives (e.g. "ai" matching "said"):
+#   _PREFILTER_EXACT  — short terms requiring word boundaries (regex)
+#   _PREFILTER_SUBSTR — longer specific terms, substring match is fine
+
+_PREFILTER_EXACT = re.compile(
+    r"\b(" + "|".join([
+        "ai", "ml", "llm", "ipo", "sec", "fed", "ceo", "cfo", "gdp", "etf",
+        "ftc", "doj", "fda", "rif", "8-k", "war", "iran", "opec",
+    ]) + r")\b",
+    re.IGNORECASE,
+)
+
+_PREFILTER_SUBSTR = [
+    # Named AI companies / products
+    "anthropic", "openai", "chatgpt", "nvidia", "mistral", "perplexity",
+    "deepmind", "llama", "copilot", "gemini",
+    # High-signal corporate events
+    "acquisition", "acqui", "merger", "takeover", "buyout",
+    "earnings", "revenue", "guidance", "profit warning",
+    "layoff", "restructur", "bankruptcy",
+    "funding round", "valuation", "series a", "series b", "series c",
+    # Regulatory / legal
+    "sanction", "tariff", "inflation", "antitrust", "indictment",
+    "lawsuit", "class action", "regulatory", "recall", "data breach",
+    "cyberattack", "hack",
+    # Macro / geopolitical
+    "ceasefire", "strait", "oil price", "interest rate",
+    # Market events
+    "analyst upgrade", "analyst downgrade",
+    "earnings beat", "earnings miss", "beat estimate", "miss estimate",
+    "short sell", "competi", "disrupt", "rebrand", "pivot",
 ]
 
 # ── Haiku classification ───────────────────────────────────────────────────────
@@ -132,8 +151,10 @@ Description: {description}
 
 
 def _passes_prefilter(title: str, description: str) -> bool:
-    text = (title + " " + description).lower()
-    return any(term in text for term in _PREFILTER_TERMS)
+    text = title + " " + (description or "")
+    if _PREFILTER_EXACT.search(text):
+        return True
+    return any(term in text.lower() for term in _PREFILTER_SUBSTR)
 
 
 def classify_with_haiku(title: str, description: str) -> tuple[int, list[str], list[str], dict]:
@@ -155,7 +176,7 @@ def classify_with_haiku(title: str, description: str) -> tuple[int, list[str], l
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+            max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
