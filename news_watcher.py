@@ -458,32 +458,11 @@ def _market_relevance(
 
 
 def scan_markets(tickers: list[str], themes: list[str], haiku_market_q: str | None = None) -> list[dict]:
-    hits: list[dict] = []
-
-    poly_data = fetch_json(POLYMARKET_URL)
-    if isinstance(poly_data, list):
-        for m in poly_data:
-            q = m.get("question", "")
-            if _market_relevance(q, tickers, themes, haiku_market_q):
-                # Parse yes-price from outcomePrices (JSON string "[\"0.72\", \"0.28\"]")
-                yes_price = None
-                try:
-                    prices = json.loads(m.get("outcomePrices") or "[]")
-                    if prices:
-                        yes_price = float(prices[0])
-                except (ValueError, TypeError):
-                    pass
-                hits.append({
-                    "platform":   "polymarket",
-                    "market":     q,
-                    "market_url": m.get("url", ""),
-                    "yes_price":  yes_price,
-                })
-
-    # Kalshi now requires authentication — disabled until API key is added
-    # kalshi_data = _fetch_json(KALSHI_URL)
-
-    return hits
+    # DISABLED: Polymarket top-50 is sports/politics dominated and relevance
+    # matching produces garbage (e.g. "GM earnings" → "Espanyol UEFA qualifier").
+    # Kalshi financial markets require auth on trading-api.kalshi.com.
+    # Re-enable once Kalshi API key is wired (KALSHI_API_KEY secret).
+    return []
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────

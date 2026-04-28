@@ -186,7 +186,7 @@ Quilvar finds **news that moves stocks**. It monitors RSS feeds, semantically cl
 2. ~~**`requirements.txt`**~~ — done ✅
 3. **Structured job logging** — write per-run metrics to a `job_runs` Supabase table (feed_name, entries_parsed, alerts_stored, errors, duration_ms). Distinguishes "quiet market" from "broken pipeline." (Effort: S)
 4. **Historical context injection** — before Haiku classifies, query `alerts` for the last 3-5 validated signals on the same ticker/theme. Inject as prompt context so Haiku knows "the last time we saw NVDA + earnings_surprise, it validated 2/3 times." SQL array overlap on existing columns — no vector DB needed. (Effort: M)
-5. **Fix `_market_implied_prob()`** — wire real Polymarket yes-price. Blocks reasoning engine activation. (Effort: M)
+5. **Wire Kalshi API** — Polymarket top-50 is sports-dominated, relevance matching was producing garbage matches (GM earnings → Espanyol UEFA). `scan_markets()` disabled. Kalshi `trading-api.kalshi.com` has real financial markets (Fed, CPI, earnings) but requires auth. Steps: (1) create Kalshi account at kalshi.com, (2) generate API key, (3) add `KALSHI_API_KEY` + `KALSHI_API_SECRET` as GitHub secrets, (4) re-implement `scan_markets()` against trading API. Blocks reasoning engine. (Effort: M)
 6. **`calendar_watcher.py`** — earnings + FOMC dates. Score-7 signal before NVDA earnings ≠ random Wednesday. (Effort: M)
 7. **Wait for calibration data** — need 30 days of validated_1d/7d/30d history before reasoning engine can activate.
 
