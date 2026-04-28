@@ -131,7 +131,14 @@ Given a headline and description, return a JSON object with exactly these fields
 
 - tickers: list of US stock tickers that would likely move on this news (uppercase).
   Think broadly — include THREATENED incumbents, BENEFICIARIES, and COMPETITORS.
-  Example: Anthropic design tool launch → ["ADBE", "FIGMA", "WIX", "GDDY", "MSFT"]
+  If the description is thin or paywalled, infer tickers from the headline alone using
+  your knowledge of which sectors/companies are affected by this type of event.
+  Examples:
+    Anthropic design tool launch → ["ADBE", "FIGMA", "MSFT"]
+    Hormuz oil supply shock → ["XLE", "CVX", "COP", "USO", "DAL", "UAL"]
+    Fed rate cut signal → ["TLT", "XLU", "REIT", "JPM", "BAC"]
+    US-China AI rivalry → ["NVDA", "AMD", "INTC", "QCOM", "META", "GOOGL"]
+  Never return an empty list if the event has a clear sector impact.
 
 - market_question: a single string — the prediction market question this event would create
   or move. E.g. "Will Adobe stock fall >5% this month?" or
