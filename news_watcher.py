@@ -176,15 +176,15 @@ def classify_with_haiku(title: str, description: str) -> tuple[int, list[str], l
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=150,
+            max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
         data = extract_json(raw)
         if data:
             score   = max(0, min(10, int(data.get("score", 0))))
-            themes  = [t for t in data.get("themes", []) if isinstance(t, str)]
-            tickers = [t for t in data.get("tickers", []) if isinstance(t, str)]
+            themes  = [t for t in (data.get("themes") or []) if isinstance(t, str)]
+            tickers = [t for t in (data.get("tickers") or []) if isinstance(t, str)]
             extras  = {
                 "market_question": data.get("market_question"),
                 "surprise":        data.get("surprise"),
